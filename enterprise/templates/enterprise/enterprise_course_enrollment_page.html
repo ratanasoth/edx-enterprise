@@ -68,24 +68,26 @@ from django.utils.translation import ugettext as _
             </div>
             <div class="course-info">
               <i class="fa fa-clock-o" aria-hidden="true"></i>
-              <span>${ starts_at_text } ${ course_start_date } &nbsp;| &nbsp; ${ course_pacing } - ${ course_pace_text }</span>
+              <span>${ starts_at_text } ${ course_start_date } &nbsp;| &nbsp; ${ course_pacing }</span>
             </div>
             ${ course_short_description }
             <a class="text-underline" href="#!">${ view_course_details_text }</a>
           </div>
-          <form>
+          <form method="POST">
+            <input type="hidden" name="csrfmiddlewaretoken" value="${ csrf_token }" />
             <div class="caption">${ select_mode_text }</div>
             % for course_mode in course_modes:
             <div class="radio-block">
               <div class="radio">
                 % if len(course_modes) > 1:
-                <input type="radio" name="data_sharing_consent" id="radio${loop.index}"
+                <input type="radio" name="course_mode" id="radio${loop.index}"
                        % if loop.first:
                        checked="checked"
                        % endif
+                       value="${ course_mode['mode'] }"
                        />
                 % else:
-                <input type="hidden" name="data_sharing_consent" id="radio${loop.index}"
+                <input type="hidden" name="course_mode" id="radio${loop.index}"
                        value="${ course_mode['mode'] }" />
                 % endif
               </div>

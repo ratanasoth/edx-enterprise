@@ -46,7 +46,7 @@ except ImportError:
 
 # isort:imports-firstparty
 from enterprise.constants import CONFIRMATION_ALERT_PROMPT, CONFIRMATION_ALERT_PROMPT_WARNING, CONSENT_REQUEST_PROMPT
-from enterprise.lms_api import CourseApiClient
+from enterprise.lms_api import CourseApiClient, EnrollmentApiClient
 from enterprise.models import (
     EnterpriseCourseEnrollment,
     EnterpriseCustomer,
@@ -461,6 +461,11 @@ class CourseEnrollmentView(View):
     information.
     """
 
+    pacing_options = {
+        'instructor': _('Instructor-Paced'),
+        'self': _('Self-Paced')
+    }
+
     context_data = {
         'page_title': _('Choose Your Track'),
         'enterprise_welcome_text': _(
@@ -470,29 +475,20 @@ class CourseEnrollmentView(View):
         ),
         'confirmation_text': _('Confirm your course'),
         'starts_at_text': _('Starts'),
-        'course_pace_text': _('Paced'),
         'view_course_details_text': _('View Course Details'),
         'select_mode_text': _('Please select one:'),
-        'enroll_text': _('Enroll'),
-        'audit_text': _('Audit'),
         'price_text': _('Price'),
         'free_price_text': _('FREE'),
-        'discount_text': _('Discount provided by {enterprise_customer_name}'),
-        'not_eligible_for_cert_text': _(
+        'verified_text': _(
+            'Earn a verified certificate!'
+        ),
+        'audit_text': _(
             'Not eligible for a certificate; does not count toward a MicroMasters'
         ),
         'continue_link_text': _('Continue'),
     }
 
-    def get_enterprise_course_enrollment_page(self, request, enterprise_uuid, course_id):
-        """
-        Render enterprise specific course track selection page.
-
-        A 404 will be raised if course details are not found against the
-        provided course id.
-
-        """
-        enterprise_customer = EnterpriseCustomer.objects.get(uuid=enterprise_uuid)  # pylint: disable=no-member
+    def get_base_details(self, request, enterprise_uuid, course_id):
         try:
             client = CourseApiClient()
             course_details = client.get_course_details(course_id)
@@ -502,6 +498,13 @@ class CourseEnrollmentView(View):
 
         if course_details is None:
             logger.error('Unable to find course details for course ID: %s', course_id)
+            raise Http404
+
+        try:
+            enrollment_client = EnrollmentApiClient()
+            modes = enrollment_client.get_course_modes(course_id)
+        except HttpClientError:
+            logger.error('Failed to determine available course modes for course ID: %s', course_id)
             raise Http404
 
         try:
@@ -521,38 +524,51 @@ class CourseEnrollmentView(View):
             # info page.
             return redirect(LMS_COURSE_URL.format(course_id=course_id))
 
+        course_modes = []
+
+        audit_modes = getattr(settings, 'ENTERPRISE_COURSE_ENROLLMENT_AUDIT_MODES', ['audit'])
+
+        for mode in modes:
+            if mode['min_price']:
+                price_text = '${}'.format(mode['min_price'])
+            else:
+                price_text = self.context_data['free_price_text']
+            course_modes.append({
+                'mode': mode['slug'],
+                'title': mode['name'],
+                'original_price': price_text,
+                'final_price': price_text,
+                'description': self.context_data['audit_text'] if mode['slug'] in audit_modes else self.context_data['verified_text'],
+                'premium': mode['slug'] not in audit_modes
+            })
+
+        return enterprise_customer, course_details, course_modes
+
+    def get_enterprise_course_enrollment_page(self, request, enterprise_customer, course_details, course_modes):
+        """
+        Render enterprise specific course track selection page.
+
+        A 404 will be raised if any of the following conditions are met:
+            * Course details are not found against the provided course id.
+            * No enterprise customer uuid querystring "ec_uuid" in the request.
+            * No enterprise customer against the enterprise customer uuid in
+                the request querystring.
+
+        """
         platform_name = configuration_helpers.get_value("PLATFORM_NAME", settings.PLATFORM_NAME)
         course_start_date = ''
         if course_details['start']:
             course_start_date = parse(course_details['start']).strftime('%B %d, %Y')
-        course_modes = [
-            {
-                'mode': 'enroll',
-                'title': self.context_data['enroll_text'],
-                'original_price': '$200',
-                'final_price': '$190',
-                'description': self.context_data['discount_text'].format(
-                    enterprise_customer_name=enterprise_customer.name,
-                ),
-            },
-            {
-                'mode': 'audit',
-                'title': self.context_data['audit_text'],
-                'original_price': self.context_data['free_price_text'],
-                'final_price': '',
-                'description': self.context_data['not_eligible_for_cert_text'],
-            },
-        ]
 
         context_data = {
             'page_title': self.context_data['page_title'],
             'page_language': get_language_from_request(request),
             'platform_name': platform_name,
-            'course_id': course_id,
+            'course_id': course_details['course_id'],
             'course_name': course_details['name'],
             'course_organization': course_details['org'],
             'course_short_description': course_details['short_description'],
-            'course_pacing': course_details['pacing'].title(),
+            'course_pacing': self.pacing_options.get(course_details['pacing'], ''),
             'course_start_date': course_start_date,
             'course_image_uri': course_details['media']['course_image']['uri'],
             'enterprise_customer': enterprise_customer,
@@ -564,7 +580,6 @@ class CourseEnrollmentView(View):
             ),
             'confirmation_text': self.context_data['confirmation_text'],
             'starts_at_text': self.context_data['starts_at_text'],
-            'course_pace_text': self.context_data['course_pace_text'],
             'view_course_details_text': self.context_data['view_course_details_text'],
             'select_mode_text': self.context_data['select_mode_text'],
             'price_text': self.context_data['price_text'],
@@ -572,6 +587,44 @@ class CourseEnrollmentView(View):
             'course_modes': filter_audit_course_modes(enterprise_customer, course_modes),
         }
         return render_to_response('enterprise_course_enrollment_page.html', context_data, request=request)
+
+    @method_decorator(enterprise_login_required)
+    def post(self, request, enterprise_uuid, course_id):
+        enterprise_customer, course, modes = self.get_base_details(request, enterprise_uuid, course_id)
+
+        selected_mode = request.POST.get('course_mode')
+
+        matching_modes = [mode for mode in modes if mode['mode'] == selected_mode]
+
+        if not matching_modes:
+            return self.get_enterprise_course_enrollment_page(request, enterprise_customer, course, modes)
+        else:
+            if matching_modes[0].get('premium', False):
+                # Premium modes should be directed to the ecommerce flow
+                return redirect(
+                    reverse(
+                        'verify_student_start_flow',
+                        kwargs={'course_id': course_id}
+                    )
+                )
+            else:
+                # Create the Enterprise backend database records for this course
+                # enrollment, then create the real enrollment in the LMS. Finally,
+                # redirect the user to the courseware page, where they'll be prompted
+                # for data sharing consent if they need to be.
+                ec_user, __ = EnterpriseCustomerUser.objects.get_or_create(
+                    user_id=request.user.id,
+                    enterprise_customer=enterprise_customer,
+                )
+                enrollment, __ = EnterpriseCourseEnrollment.objects.get_or_create(
+                    enterprise_customer_user=ec_user,
+                    course_id=course_id,
+                )
+
+                client = EnrollmentApiClient()
+                client.enroll_user_in_course(request.user.username, course_id, selected_mode)
+                
+                return redirect('courseware', course_id)
 
     @method_decorator(enterprise_login_required)
     def get(self, request, enterprise_uuid, course_id):
@@ -591,4 +644,6 @@ class CourseEnrollmentView(View):
         # Verify that all necessary resources are present
         verify_edx_resources()
 
-        return self.get_enterprise_course_enrollment_page(request, enterprise_uuid, course_id)
+        enterprise_customer, course, modes = self.get_base_details(request, enterprise_uuid, course_id)
+
+        return self.get_enterprise_course_enrollment_page(request, enterprise_customer, course, modes)
