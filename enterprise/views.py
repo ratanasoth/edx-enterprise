@@ -515,15 +515,6 @@ class CourseEnrollmentView(View):
             logger.error('Unable to find enterprise customer for UUID: %s', enterprise_uuid)
             raise Http404
 
-        if EnterpriseCourseEnrollment.objects.filter(
-                enterprise_customer_user__enterprise_customer=enterprise_customer,
-                enterprise_customer_user__user_id=request.user.id,
-                course_id=course_id
-        ).exists():
-            # The user is already enrolled in the course through the Enterprise Customer, so redirect to the course
-            # info page.
-            return redirect(LMS_COURSE_URL.format(course_id=course_id))
-
         course_modes = []
 
         audit_modes = getattr(settings, 'ENTERPRISE_COURSE_ENROLLMENT_AUDIT_MODES', ['audit'])
@@ -645,5 +636,14 @@ class CourseEnrollmentView(View):
         verify_edx_resources()
 
         enterprise_customer, course, modes = self.get_base_details(request, enterprise_uuid, course_id)
+
+        if EnterpriseCourseEnrollment.objects.filter(
+                enterprise_customer_user__enterprise_customer=enterprise_customer,
+                enterprise_customer_user__user_id=request.user.id,
+                course_id=course_id
+        ).exists():
+            # The user is already enrolled in the course through the Enterprise Customer, so redirect to the course
+            # info page.
+            return redirect(LMS_COURSE_URL.format(course_id=course_id))
 
         return self.get_enterprise_course_enrollment_page(request, enterprise_customer, course, modes)
