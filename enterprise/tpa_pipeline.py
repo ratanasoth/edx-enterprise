@@ -141,6 +141,7 @@ def handle_enterprise_logistration(backend, user, **kwargs):
         """
         return redirect(reverse('grant_data_sharing_permissions'))
 
+    consent = None
     enterprise_customer = get_ec_for_running_pipeline({'backend': backend.name, 'kwargs': kwargs})
     if enterprise_customer is None:
         # This pipeline element is not being activated as a part of an Enterprise logistration
@@ -194,6 +195,6 @@ def handle_enterprise_logistration(backend, user, **kwargs):
         if enterprise_customer.enforces_data_sharing_consent(EnterpriseCustomer.AT_LOGIN):
             return redirect_to_consent()
 
-    if (not consent.enabled) and enterprise_customer.enforces_data_sharing_consent(EnterpriseCustomer.AT_LOGIN):
+    if getattr(consent, 'enabled', False) and enterprise_customer.enforces_data_sharing_consent(EnterpriseCustomer.AT_LOGIN):
         # If consent has been declined, and the enterprise customer requires it, redirect to get it.
         return redirect_to_consent()
