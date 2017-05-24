@@ -587,7 +587,12 @@ def enterprise_login_required(view):
                 current_url=quote(request.get_full_path()),
                 query_string=urlencode({'tpa_hint': enterprise_customer.identity_provider})
             )
-            return redirect('{login_url}?next={next_url}'.format(login_url='/login', next_url=next_url))
+            return redirect('{login_url}?{next}'.format(
+                login_url='/login',
+                next=urlencode({
+                    'next': next_url
+                })
+            ))
 
         return view(request, *args, **kwargs)
     return wrapper
