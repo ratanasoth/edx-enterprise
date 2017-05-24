@@ -66,7 +66,7 @@ from six.moves.urllib.parse import urljoin  # pylint: disable=import-error
 
 logger = getLogger(__name__)  # pylint: disable=invalid-name
 
-LMS_COURSE_URL = urljoin(settings.LMS_ROOT_URL, '/courses/{course_id}')
+LMS_COURSE_URL = urljoin(settings.LMS_ROOT_URL, '/courses/{course_id}/courseware')
 
 
 def verify_edx_resources():
