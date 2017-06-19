@@ -601,15 +601,30 @@ def enterprise_login_required(view):
 
         enterprise_uuid = kwargs['enterprise_uuid']
         enterprise_customer = get_enterprise_customer_or_404(enterprise_uuid)
+        provider_id = enterprise_customer.identity_provider
 
-        # Now verify if the user is logged in. If user is not logged in then
-        # send the user to the login screen to sign in with an
-        # Enterprise-linked SSO and the pipeline will get them back here.
-        if not request.user.is_authenticated():
-            next_url = '{current_url}?{query_string}'.format(
-                current_url=quote(request.get_full_path()),
-                query_string=urlencode({'tpa_hint': enterprise_customer.identity_provider})
+        try:
+            sso_provider = get_identity_provider(provider_id)
+        except ValueError:
+            sso_provider = None
+
+        if not sso_provider:
+            raise Http404
+
+        decorator_already_processed = request.GET.get('session_cleared') == 'yes'
+        next_url = '{current_url}?{params}'.format(
+            current_url=quote(request.get_full_path()),
+            params=urlencode(
+                [
+                    ('tpa_hint', provider_id),
+                    ('session_cleared', 'yes')
+                ]
             )
+        )
+
+        if not request.user.is_authenticated():
+            # If the user isn't logged in, send them to the log in page and redirect them
+            # back to the original view, indicating that the decorator has been processed.
             return redirect(
                 '{login_url}?{params}'.format(
                     login_url='/login',
@@ -618,5 +633,21 @@ def enterprise_login_required(view):
                     )
                 )
             )
-        return view(request, *args, **kwargs)
+        elif not decorator_already_processed and sso_provider.drop_existing_session:
+            # If the user is logged in, this is their first time hitting the decorator,
+            # and the sso provider is configured to drop the session, send them to
+            # the logout page with a redirect back to the original view,
+            # indicating the decorator has been processed.
+            return redirect(
+                '{logout_url}?{params}'.format(
+                    logout_url=request.build_absolute_uri(reverse('logout')),
+                    params=urlencode(
+                        {'redirect_url': next_url}
+                    )
+                )
+            )
+        else:
+            # Otherwise, they can proceed to the original view.
+            return view(request, *args, **kwargs)
+
     return wrapper

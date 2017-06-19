@@ -1053,11 +1053,13 @@ class TestEnterpriseUtils(unittest.TestCase):
         with raises(Http404):
             utils.enterprise_login_required(view_function)(request, **kwargs)
 
-    def test_enterprise_login_required_redirects_for_anonymous_users(self):
+    @mock.patch('enterprise.utils.Registry')
+    def test_enterprise_login_required_redirects_for_anonymous_users(self, mock_registry):
         """
         Test that the decorator `enterprise_login_required` returns Http
         Redirect for anonymous users.
         """
+        mock_registry.get.return_value.configure_mock(provider_id=self.provider_id, drop_existing_session=False)
         view_function = self.mock_view_function()
         course_id = 'course-v1:edX+DemoX+Demo_Course'
         enterprise_dashboard_url = reverse(
@@ -1075,7 +1077,8 @@ class TestEnterpriseUtils(unittest.TestCase):
         # user tries to access enterprise course enrollment page.
         assert response.status_code == 302
 
-    def test_enterprise_login_required(self):
+    @mock.patch('enterprise.utils.Registry')
+    def test_enterprise_login_required(self, mock_registry):
         """
         Test that the enterprise login decorator calls the view function.
 
@@ -1086,6 +1089,7 @@ class TestEnterpriseUtils(unittest.TestCase):
             2. User making the request is authenticated.
 
         """
+        mock_registry.get.return_value.configure_mock(provider_id=self.provider_id, drop_existing_session=False)
         view_function = self.mock_view_function()
         course_id = 'course-v1:edX+DemoX+Demo_Course'
         enterprise_dashboard_url = reverse(
