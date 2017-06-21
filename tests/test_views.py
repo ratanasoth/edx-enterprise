@@ -919,6 +919,9 @@ class TestGrantDataSharingPermissions(TestCase):
             course_api_client_mock,
             *args  # pylint: disable=unused-argument
     ):
+        # Verify that enterprise learner is redirected back to enterprise
+        # course enrollment page with consent decline warning message, if
+        # the learner decline the DSC consent.
         self._login()
         course_id = 'course-v1:edX+DemoX+Demo_Course'
         course_name = 'edX Demo Course'
