@@ -1106,6 +1106,51 @@ class TestEnterpriseUtils(unittest.TestCase):
         # Assert that view function was called.
         assert view_function.called
 
+    @mock.patch('enterprise.utils.get_identity_provider', side_effect=ValueError)
+    def test_enterprise_login_required_no_sso_provider(self, mock_registry):  # pylint: disable=unused-argument
+        """
+        Test that the enterprise login decorator calls the view function when no sso provider is configured.
+        """
+
+        view_function = self.mock_view_function()
+        course_id = 'course-v1:edX+DemoX+Demo_Course'
+        enterprise_dashboard_url = reverse(
+            'enterprise_course_enrollment_page',
+            args=[self.customer.uuid, course_id],
+        )
+        request = RequestFactory().get(enterprise_dashboard_url)
+        request.user = UserFactory(is_active=True)
+
+        utils.enterprise_login_required(view_function)(
+            request, enterprise_uuid=self.customer.uuid, course_id=course_id
+        )
+
+        # Assert that view function was called.
+        assert view_function.called
+
+    @mock.patch('enterprise.utils.Registry')
+    def test_enterprise_login_required_with_drop_existing_session(self, mock_registry):
+        """
+        Test that the enterprise login decorator redirects authenticated users with the appropriate provider config.
+        """
+        mock_registry.get.return_value.configure_mock(provider_id=self.provider_id, drop_existing_session=True)
+        view_function = self.mock_view_function()
+        course_id = 'course-v1:edX+DemoX+Demo_Course'
+        enterprise_dashboard_url = reverse(
+            'enterprise_course_enrollment_page',
+            args=[self.customer.uuid, course_id],
+        )
+        request = RequestFactory().get(enterprise_dashboard_url)
+        request.user = UserFactory(is_active=True)
+
+        response = utils.enterprise_login_required(view_function)(
+            request, enterprise_uuid=self.customer.uuid, course_id=course_id
+        )
+
+        # Assert that redirect status code 302 is returned when a logged in user comes in
+        # with an sso provider set to drop existing sessions
+        assert response.status_code == 302
+
 
 def get_transformed_course_metadata(course_id, status):
     """
